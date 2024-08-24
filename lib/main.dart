@@ -1,144 +1,138 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:flutter_joystick/flutter_joystick.dart';
+import 'package:flutter_bluetooth_serial/flutter_bluetooth_serial.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'ControlPanel.dart';
+import 'bluetooth_service.dart';
 
 void main() {
-  WidgetsFlutterBinding.ensureInitialized();
-  // Cố định màn hình ở chế độ nằm ngang
-  SystemChrome.setPreferredOrientations([
-    DeviceOrientation.landscapeRight,
-    DeviceOrientation.landscapeLeft,
-  ]).then((_) {
-    runApp(const MaterialApp(home: ControlPanel()));
-  });
+  runApp(const MaterialApp(home: BluetoothSearchPage()));
 }
 
-class ControlPanel extends StatefulWidget {
-  const ControlPanel({super.key});
+class BluetoothSearchPage extends StatefulWidget {
+  const BluetoothSearchPage({super.key});
 
   @override
-  _ControlPanelState createState() => _ControlPanelState();
+  // ignore: library_private_types_in_public_api
+  _BluetoothSearchPageState createState() => _BluetoothSearchPageState();
 }
 
-class _ControlPanelState extends State<ControlPanel> {
+class _BluetoothSearchPageState extends State<BluetoothSearchPage> {
+  final BluetoothService _bluetoothService = BluetoothService();
+  List<BluetoothDevice> _devices = [];
+  bool _isConnecting = false;
+  bool _isScanning = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _requestBluetoothPermissions();
+  }
+
+  Future<void> _requestBluetoothPermissions() async {
+    Map<Permission, PermissionStatus> statuses = await [
+      Permission.bluetoothConnect,
+      Permission.bluetoothScan,
+      Permission.location,
+    ].request();
+
+    if (statuses[Permission.bluetoothConnect]!.isGranted &&
+        statuses[Permission.bluetoothScan]!.isGranted &&
+        statuses[Permission.location]!.isGranted) {
+      _loadBondedDevices();
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text(
+                'Bạn cần cấp quyền Bluetooth và vị trí để sử dụng ứng dụng')),
+      );
+    }
+  }
+
+  Future<void> _loadBondedDevices() async {
+    List<BluetoothDevice> devices = await _bluetoothService.getBondedDevices();
+    setState(() {
+      _devices = devices;
+    });
+  }
+
+  Future<void> _scanForDevices() async {
+    setState(() {
+      _isScanning = true;
+      _devices = []; // Xóa danh sách cũ trước khi quét mới
+    });
+
+    FlutterBluetoothSerial.instance.startDiscovery().listen((r) {
+      setState(() {
+        _devices.add(r.device);
+      });
+    }).onDone(() {
+      setState(() {
+        _isScanning = false;
+      });
+    });
+  }
+
+  void _connectToDevice(BluetoothDevice device) async {
+    setState(() {
+      _isConnecting = true;
+    });
+
+    bool isConnected = await _bluetoothService.connectToDevice(device);
+    setState(() {
+      _isConnecting = false;
+    });
+
+    if (isConnected) {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (context) =>
+              ControlPanel(bluetoothService: _bluetoothService),
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Kết nối thất bại')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.grey[200],
-      body: Center(
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            // Nút điều khiển bên trái (Joystick)
-            Expanded(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  // Sử dụng Stack để chồng vòng tròn lên joystick
-                  Stack(
-                    alignment: Alignment.center,
-                    children: [
-                      // Vòng tròn bên ngoài
-                      Container(
-                        width: 200,
-                        height: 200,
-                        decoration: BoxDecoration(
-                          color: Colors.grey[400],
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                      // Joystick
-                      Joystick(
-                        mode: JoystickMode.all,
-                        listener: (direction) {
-                          // Xử lý hướng di chuyển
-                          print('Hướng: ${direction.toString()}');
-                        },
-                        stick: Container(
-                          width: 60, // Kích thước của stick
-                          height: 60, // Kích thước của stick
-                          decoration: const BoxDecoration(
-                            color: Colors.blue,
-                            shape: BoxShape.circle,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(
-                width: 20), // Khoảng cách giữa joystick và nút điều khiển
-            // Nút điều khiển bên phải
-            Expanded(
-              child: Center(
-                // Căn giữa GridView
-                child: GridView.count(
-                  crossAxisCount: 3, // 3 cột
-                  mainAxisSpacing: 10, // Khoảng cách dọc
-                  crossAxisSpacing: 10, // Khoảng cách ngang
-                  padding: const EdgeInsets.all(20),
-                  shrinkWrap:
-                      true, // Giúp GridView không chiếm không gian không cần thiết
-                  physics: const NeverScrollableScrollPhysics(), // Tắt cuộn
-                  children: [
-                    // Hàng 1
-                    _buildRoundedButton('Mở tay kẹp trái', () {
-                      print('Mở tay kẹp trái');
-                    }),
-                    _buildRoundedButton('Đóng tay kẹp trái', () {
-                      print('Đóng tay kẹp trái');
-                    }),
-                    // Hàng 2
-                    _buildRoundedButton('Mở tay kẹp phải', () {
-                      print('Mở tay kẹp phải');
-                    }),
-                    _buildRoundedButton('Đóng tay kẹp phải', () {
-                      print('Đóng tay kẹp phải');
-                    }),
-                    // Hàng 3
-                    _buildRoundedButton('Nâng tay kẹp', () {
-                      print('Nâng tay kẹp');
-                    }),
-                    _buildRoundedButton('Hạ tay kẹp', () {
-                      print('Hạ tay kẹp');
-                    }),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildRoundedButton(String label, VoidCallback onPressed) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.blue, // Màu nền nút
-        borderRadius: BorderRadius.circular(15), // Bo tròn 4 góc
-      ),
-      child: ElevatedButton(
-        onPressed: onPressed,
-        style: ElevatedButton.styleFrom(
-          backgroundColor:
-              Colors.transparent, // Màu nền của nút, sử dụng màu của Container
-          shadowColor: Colors.transparent, // Không có bóng
-          padding: const EdgeInsets.symmetric(
-              vertical: 20, horizontal: 20), // Kích thước nút
-        ),
-        child: Center(
-          // Căn giữa chữ
-          child: Text(
-            label,
-            style: const TextStyle(
-                fontSize: 16, color: Colors.black), // Kích thước chữ
-            textAlign: TextAlign.center, // Căn giữa chữ
+      appBar: AppBar(
+        title: const Text('Tìm kiếm thiết bị Bluetooth'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.search),
+            onPressed: _scanForDevices,
           ),
-        ),
+        ],
       ),
+      body: _isConnecting
+          ? const Center(child: CircularProgressIndicator())
+          : _isScanning
+              ? const Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    CircularProgressIndicator(),
+                    SizedBox(height: 20),
+                    Text('Đang quét các thiết bị...'),
+                  ],
+                )
+              : _devices.isEmpty
+                  ? const Center(child: Text('Không tìm thấy thiết bị nào'))
+                  : ListView.builder(
+                      itemCount: _devices.length,
+                      itemBuilder: (context, index) {
+                        BluetoothDevice device = _devices[index];
+                        return ListTile(
+                          title: Text(device.name ?? 'Thiết bị không tên'),
+                          subtitle: Text(device.address),
+                          onTap: () => _connectToDevice(device),
+                        );
+                      },
+                    ),
     );
   }
 }
